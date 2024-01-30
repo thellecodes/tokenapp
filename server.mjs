@@ -1,81 +1,86 @@
-import {} from "@concordium/web-sdk";
+import {
+  AccountAddress,
+  AccountTransactionType,
+  CcdAmount,
+  signTransaction,
+  TransactionExpiry,
+  buildAccountSigner,
+  parseWallet,
+} from "@concordium/web-sdk";
 import { ConcordiumGRPCNodeClient } from "@concordium/web-sdk/nodejs";
 import { credentials } from "@grpc/grpc-js";
-import { readFileSync } from "node:fs";
 import express from "express";
-
-// const cli = meow(
-//     `
-//   Usage
-//     $ yarn run-example <path-to-this-file> [options]
-
-//   Required
-//     --amount,      -a  The amount to send
-//     --receiver,    -r  The receivnig account address
-//     --wallet-file, -w  A path to a wallet export file from a Concordium wallet
-
-//   Options
-//     --help,         Displays this message
-//     --memo,     -m  A hex-encoded memo to be included in the transaction, by default there is no memo
-//     --endpoint, -e  Specify endpoint of the form "address:port", defaults to localhost:20000
-// `,
-//     {
-//         importMeta: import.meta,
-//         flags: {
-//             amount: {
-//                 type: 'number',
-//                 alias: 'a',
-//                 isRequired: true,
-//             },
-//             receiver: {
-//                 type: 'string',
-//                 alias: 'r',
-//                 isRequired: true,
-//             },
-//             walletFile: {
-//                 type: 'string',
-//                 alias: 'w',
-//                 isRequired: true,
-//             },
-//             memo: {
-//                 type: 'string',
-//                 alias: 'm',
-//                 default: '',
-//             },
-//             endpoint: {
-//                 type: 'string',
-//                 alias: 'e',
-//                 default: 'localhost:20000',
-//             },
-//         },
-//     }
-// );
-
-// const [address, port] = parseEndpoint(cli.flags.endpoint);
-// const client = new ConcordiumGRPCNodeClient(
-//     address,
-//     Number(port),
-//     credentials.createInsecure()
-// );
-
-// /**
-//  * The following example demonstrates how a simple transfer can be created.
-//  */
-
-// (async () => )();
+import { readFileSync } from "node:fs";
+import { join } from "path";
 
 const app = express();
 const port = process.env.PORT || 3002;
+app.use(express.json());
+
+app.get("/", (req, res) => res.send("welcome to techFiesta CCD Token Server"));
+
+//[x] protect with a middleware
 
 // Home route
-app.get("/", (req, res) => {
-  const client = new ConcordiumGRPCNodeClient(
-    "164.92.73.190",
-    20001,
-    credentials.createInsecure()
-  );
+app.post("/", async (req, res) => {
+  try {
+    const { caccount } = req.body;
 
-  res.send("works fine").status(200);
+    const client = new ConcordiumGRPCNodeClient(
+      "164.92.73.190",
+      20001,
+      credentials.createInsecure()
+    );
+
+    const fileName =
+      "395NEo2MeaJysfsnNkj9g1X6FSjXKZsHDZz4UCj3j5AfNwnpqU.export";
+
+    const filePath = join(process.cwd(), "keys", fileName);
+
+    const fileContent = readFileSync(filePath, "utf8");
+    const walletExport = parseWallet(fileContent);
+
+    const sender = AccountAddress.fromBase58(walletExport.value.address);
+
+    const toAddress = AccountAddress.fromBase58(caccount);
+
+    const nextNonce = await client.getNextAccountNonce(sender);
+
+    const header = {
+      expiry: TransactionExpiry.futureMinutes(60),
+      nonce: nextNonce.nonce,
+      sender,
+    };
+
+    const simpleTransfer = {
+      amount: CcdAmount.fromMicroCcd(100000000),
+      toAddress,
+    };
+
+    // #region documentation-snippet-sign-transaction
+    const accountTransaction = {
+      header: header,
+      payload: simpleTransfer,
+      type: AccountTransactionType.Transfer,
+    };
+
+    // Sign transaction
+    const signer = buildAccountSigner(walletExport);
+    const signature = await signTransaction(accountTransaction, signer);
+
+    const transactionHash = await client.sendAccountTransaction(
+      accountTransaction,
+      signature
+    );
+
+    const status = await client.waitForTransactionFinalization(transactionHash);
+
+    console.log(status);
+
+    return res.status(200).send({ mintToAccount: true });
+  } catch (err) {
+    return res.send(err.message).status(500);
+  }
 });
 
 // Start the server
