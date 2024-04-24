@@ -77,7 +77,7 @@ app.post("/airdrop", async (req, res) => {
     console.log(hashHex);
   });
 
-  return res.status(200);
+  return res.status(200).send({ distributed: true });
 });
 
 // Home route
