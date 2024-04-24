@@ -19,30 +19,27 @@ app.use(express.json());
 
 app.get("/", (req, res) => res.send("welcome to techFiesta CCD Token Server"));
 
-//[x] protect with a middleware
+const client = new ConcordiumGRPCNodeClient(
+  "grpc.mainnet.concordium.software",
+  20000,
+  credentials.createSsl()
+);
 
-// Home route
-app.post("/", async (req, res) => {
-  try {
-    const { caccount } = req.body;
+//airdrop
+app.post("/airdrop", async (req, res) => {
+  const { wallets, amount } = req.body;
 
-    const client = new ConcordiumGRPCNodeClient(
-      "164.92.73.190",
-      20001,
-      credentials.createInsecure()
-    );
+  const fileName = "3vQpCVjpfLLg5qKDN11YEkuWC5W69Q9zstXSMANahAT9bZSFNQ.export";
 
-    const fileName =
-      "395NEo2MeaJysfsnNkj9g1X6FSjXKZsHDZz4UCj3j5AfNwnpqU.export";
+  const filePath = join(process.cwd(), "keys", fileName);
 
-    const filePath = join(process.cwd(), "keys", fileName);
+  const fileContent = readFileSync(filePath, "utf8");
+  const walletExport = parseWallet(fileContent);
 
-    const fileContent = readFileSync(filePath, "utf8");
-    const walletExport = parseWallet(fileContent);
+  const sender = AccountAddress.fromBase58(walletExport.value.address);
 
-    const sender = AccountAddress.fromBase58(walletExport.value.address);
-
-    const toAddress = AccountAddress.fromBase58(caccount);
+  wallets.forEach(async (wallet) => {
+    const toAddress = AccountAddress.fromBase58(wallet);
 
     const nextNonce = await client.getNextAccountNonce(sender);
 
@@ -53,7 +50,7 @@ app.post("/", async (req, res) => {
     };
 
     const simpleTransfer = {
-      amount: CcdAmount.fromMicroCcd(100000000),
+      amount: CcdAmount.fromMicroCcd(Number(`${amount}000000`)),
       toAddress,
     };
 
@@ -75,13 +72,79 @@ app.post("/", async (req, res) => {
 
     const status = await client.waitForTransactionFinalization(transactionHash);
 
-    console.log(status);
+    const hashHex = bufferToHex(transactionHash.buffer);
 
-    return res.status(200).send({ mintToAccount: true });
+    console.log(hashHex);
+  });
+
+  return res.status(200);
+});
+
+// Home route
+app.post("/", async (req, res) => {
+  try {
+    const { caccount } = req.body;
+
+    const fileName =
+      "3vQpCVjpfLLg5qKDN11YEkuWC5W69Q9zstXSMANahAT9bZSFNQ.export";
+
+    const filePath = join(process.cwd(), "keys", fileName);
+
+    const fileContent = readFileSync(filePath, "utf8");
+    const walletExport = parseWallet(fileContent);
+
+    const sender = AccountAddress.fromBase58(walletExport.value.address);
+
+    const toAddress = AccountAddress.fromBase58(caccount);
+
+    const nextNonce = await client.getNextAccountNonce(sender);
+
+    const header = {
+      expiry: TransactionExpiry.futureMinutes(60),
+      nonce: nextNonce.nonce,
+      sender,
+    };
+
+    const simpleTransfer = {
+      amount: CcdAmount.fromMicroCcd(1000000),
+      toAddress,
+    };
+
+    // #region documentation-snippet-sign-transaction
+    const accountTransaction = {
+      header: header,
+      payload: simpleTransfer,
+      type: AccountTransactionType.Transfer,
+    };
+
+    // Sign transaction
+    const signer = buildAccountSigner(walletExport);
+    const signature = await signTransaction(accountTransaction, signer);
+
+    const transactionHash = await client.sendAccountTransaction(
+      accountTransaction,
+      signature
+    );
+
+    const status = await client.waitForTransactionFinalization(transactionHash);
+
+    const hashHex = bufferToHex(transactionHash.buffer);
+
+    return res
+      .status(200)
+      .send({ mintToAccount: true, transactionHash: hashHex });
   } catch (err) {
     return res.send(err.message).status(500);
   }
 });
+
+function bufferToHex(buffer) {
+  return Array.prototype.map
+    .call(buffer, function (byte) {
+      return ("0" + (byte & 0xff).toString(16)).slice(-2);
+    })
+    .join("");
+}
 
 // Start the server
 app.listen(port, () => {
