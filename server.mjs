@@ -26,6 +26,7 @@ const client = new ConcordiumGRPCNodeClient(
 );
 
 //airdrop
+//airdrop
 app.post("/airdrop", async (req, res) => {
   const { wallets, amount } = req.body;
 
@@ -38,46 +39,63 @@ app.post("/airdrop", async (req, res) => {
 
   const sender = AccountAddress.fromBase58(walletExport.value.address);
 
-  wallets.forEach(async (wallet) => {
-    const toAddress = AccountAddress.fromBase58(wallet);
+  try {
+    // Array to hold promises for each wallet transaction
+    const promises = wallets.map(async (wallet) => {
+      const toAddress = AccountAddress.fromBase58(wallet);
 
-    const nextNonce = await client.getNextAccountNonce(sender);
+      const nextNonce = await client.getNextAccountNonce(sender);
 
-    const header = {
-      expiry: TransactionExpiry.futureMinutes(60),
-      nonce: nextNonce.nonce,
-      sender,
-    };
+      const header = {
+        expiry: TransactionExpiry.futureMinutes(60),
+        nonce: nextNonce.nonce,
+        sender,
+      };
 
-    const simpleTransfer = {
-      amount: CcdAmount.fromMicroCcd(Number(`${amount}000000`)),
-      toAddress,
-    };
+      const simpleTransfer = {
+        amount: CcdAmount.fromMicroCcd(Number(`${amount}000000`)),
+        toAddress,
+      };
 
-    // #region documentation-snippet-sign-transaction
-    const accountTransaction = {
-      header: header,
-      payload: simpleTransfer,
-      type: AccountTransactionType.Transfer,
-    };
+      // #region documentation-snippet-sign-transaction
+      const accountTransaction = {
+        header: header,
+        payload: simpleTransfer,
+        type: AccountTransactionType.Transfer,
+      };
 
-    // Sign transaction
-    const signer = buildAccountSigner(walletExport);
-    const signature = await signTransaction(accountTransaction, signer);
+      // Sign transaction
+      const signer = buildAccountSigner(walletExport);
+      const signature = await signTransaction(accountTransaction, signer);
 
-    const transactionHash = await client.sendAccountTransaction(
-      accountTransaction,
-      signature
-    );
+      const transactionHash = await client.sendAccountTransaction(
+        accountTransaction,
+        signature
+      );
 
-    const status = await client.waitForTransactionFinalization(transactionHash);
+      const status = await client.waitForTransactionFinalization(
+        transactionHash
+      );
 
-    const hashHex = bufferToHex(transactionHash.buffer);
+      const hashHex = bufferToHex(transactionHash.buffer);
 
-    console.log(hashHex);
-  });
+      console.log(hashHex);
 
-  return res.status(200).send({ distributed: true });
+      return true; // Indicate success for this wallet
+    });
+
+    // Wait for all promises to resolve
+    await Promise.all(promises);
+
+    // If all promises resolve without error, send the response
+    return res.status(200).send({ distributed: true });
+  } catch (error) {
+    // If any error occurs during the process, send an error response
+    console.error("An error occurred:", error);
+    return res
+      .status(500)
+      .send({ error: "An error occurred while processing the airdrop." });
+  }
 });
 
 // Home route
